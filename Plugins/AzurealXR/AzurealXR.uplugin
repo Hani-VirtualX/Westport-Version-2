@@ -1,0 +1,46 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "1.0",
+  "FriendlyName": "AzurealXR",
+  "Description": "Azureal XR Core Simulation Framework",
+  "Category": "Azureal",
+  "CreatedBy": "VirtualX Hao",
+  "CreatedByURL": "",
+  "DocsURL": "",
+  "MarketplaceURL": "",
+  "SupportURL": "",
+  "CanContainContent": true,
+  "IsBetaVersion": false,
+  "IsExperimentalVersion": false,
+  "Installed": false,
+  "Modules": [
+    {
+      "Name": "AzurealXR",
+      "Type": "Runtime",
+      "LoadingPhase": "Default",
+      "PlatformAllowList": [
+        "Win64",
+        "Android"
+      ]
+    }
+  ],
+  "Plugins": [
+    {
+      "Name": "OpenXR",
+      "Enabled": true
+    },
+    {
+      "Name": "EnhancedInput",
+      "Enabled": true
+    },
+    {
+      "Name": "XRBase",
+      "Enabled": true
+    },
+    {
+      "Name": "CableComponent",
+      "Enabled": true
+    }
+  ]
+}

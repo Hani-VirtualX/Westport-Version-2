@@ -1,0 +1,24 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "AzurealForceExit",
+	"Description": "Instant 'Force Kill' node for immediate application termination on Windows for PCVR platforms.",
+	"Category": "Other",
+	"CreatedBy": "VX_Hao",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": true,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "AzurealForceExit",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}

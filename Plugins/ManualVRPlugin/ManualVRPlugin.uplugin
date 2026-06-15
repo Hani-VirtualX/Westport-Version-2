@@ -1,0 +1,24 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "ManualVRPlugin",
+	"Description": "This plugin is to communicate between Unreal Engine and ManualVR",
+	"Category": "Other",
+	"CreatedBy": "Virtual X Sdn Bhd",
+	"CreatedByURL": "www.virtualx.my",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": true,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "ManualVRPlugin",
+			"Type": "Runtime",
+			"LoadingPhase": "PreLoadingScreen"
+		}
+	]
+}
