@@ -43,6 +43,10 @@
 		{
 			"Name": "HDRIBackdrop",
 			"Enabled": true
+		},
+		{
+			"Name": "DatasmithImporter",
+			"Enabled": true
 		}
 	]
 }
