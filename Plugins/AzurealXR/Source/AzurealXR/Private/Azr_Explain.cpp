@@ -46,7 +46,8 @@ UAzr_Explain::UAzr_Explain() {
     TetherCable = CreateDefaultSubobject<UCableComponent>(TEXT("Explain_TetherCable"));
     TetherCable->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     TetherCable->SetVisibility(false);
-    TetherCable->NumSegments = 1;
+    TetherCable->NumSegments = 20;
+    TetherCable->SolverIterations = 4;
     TetherCable->CableLength = 0.0f;
 
     // --- ASSET INITIALIZATION ---
@@ -186,6 +187,21 @@ void UAzr_Explain::TickComponent(float DeltaTime, ELevelTick TickType, FActorCom
 
         FVector DynamicEndPos = CalculateSurfaceAnchor(ActiveWidgetComp, CurrentActiveStep.TetherSettings.WidgetAnchorPos, CurrentActiveStep.TetherSettings);
         EndAnchor->SetWorldLocation(DynamicEndPos);
+
+        // --- THE FIX: EXACT DISTANCE, NO TENSION ---
+        float ActualDistance = FVector::Dist(StartAnchor->GetComponentLocation(), DynamicEndPos);
+        float Slack = CurrentActiveStep.TetherSettings.CableHang;
+
+        if (Slack <= 0.1f) {
+            // Set it to the EXACT distance. No pulling, no slack.
+            // Gravity is 0 so it perfectly connects A to B without drooping.
+            TetherCable->CableLength = ActualDistance;
+            TetherCable->CableGravityScale = 0.0f;
+        }
+        else {
+            TetherCable->CableLength = ActualDistance + Slack;
+            TetherCable->CableGravityScale = 1.0f;
+        }
     }
 
     // --- 3. HIGHLIGHT PULSE ---
@@ -413,6 +429,7 @@ void UAzr_Explain::ToggleTether(bool bState) {
         TetherCable->SetMaterial(0, CurrentActiveStep.TetherSettings.CableMaterial);
     }
 
+    // Assign the Width
     TetherCable->CableWidth = CurrentActiveStep.TetherSettings.CableWidth;
 
     bool bStartCorrect = (StartAnchor->GetAttachParent() == MeshTarget);
@@ -429,13 +446,65 @@ void UAzr_Explain::ToggleTether(bool bState) {
         EndAnchor->SetWorldLocation(EndPos);
     }
 
+    
     TetherCable->SetAttachEndToComponent(EndAnchor);
     TetherCable->SetRelativeLocation(FVector::ZeroVector);
     TetherCable->EndLocation = FVector::ZeroVector;
 
+    // --- THE FIX: NUKE ALL COLLISION ---
+    TetherCable->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    TetherCable->SetCollisionResponseToAllChannels(ECR_Ignore);
+    TetherCable->bEnableCollision = false;
+
+    // --- NEW: PERCENTAGE MATH & STIFF HANG ---
+    float HangPercentage = CurrentActiveStep.TetherSettings.CableHang / 100.0f;
+    float InitialDist = FVector::Dist(StartAnchor->GetComponentLocation(), EndAnchor->GetComponentLocation());
+
+    if (HangPercentage <= 0.001f) {
+        // 0% Hang = 1 Segment Straight Line
+        TetherCable->NumSegments = 1;
+        TetherCable->CableLength = InitialDist;
+        TetherCable->CableGravityScale = 0.0f;
+        TetherCable->bEnableStiffness = false;
+    }
+    else {
+        // > 0% Hang = 20 Segments
+        TetherCable->NumSegments = 20;
+
+        // Calculate slack based on the percentage of the distance!
+        float SlackAmount = InitialDist * HangPercentage;
+        TetherCable->CableLength = InitialDist + SlackAmount;
+
+        // Gentle gravity scaling based on percentage
+        TetherCable->CableGravityScale = FMath::Clamp(HangPercentage * 0.5f, 0.01f, 0.5f);
+
+        // --- THE STIFF HANG FIX ---
+        // Force the cable to act like a solid bendable wire instead of a bouncy string
+        TetherCable->bEnableStiffness = true;
+
+        // Crank the solver to instantly resolve physics and kill momentum/wobble
+        TetherCable->SolverIterations = 16;
+    }
+
+    TetherCable->RecreatePhysicsState();
+
+    // Turn on the Anchors immediately
     StartAnchor->SetVisibility(true);
     EndAnchor->SetVisibility(true);
-    TetherCable->SetVisibility(true);
+
+    // --- THE FIX: THE INVISIBILITY CLOAK ---
+    // Keep the cable hidden while the physics solver settles the initial teleport momentum
+    TetherCable->SetVisibility(false);
+
+    if (UWorld* World = GetWorld()) {
+        FTimerHandle SettleTimer;
+        World->GetTimerManager().SetTimer(SettleTimer, FTimerDelegate::CreateWeakLambda(this, [this]() {
+            // Only turn it on if the Explain UI is still active (prevents bugs if player closed it instantly)
+            if (bIsActive && TetherCable) {
+                TetherCable->SetVisibility(true);
+            }
+            }), 0.20f, false);
+    }
 }
 
 void UAzr_Explain::ToggleHighlight(bool bState) {

@@ -1,5 +1,7 @@
 
 
+
+
 #include "Azr_Gaze.h"
 #include "Azr_Interactable.h"
 #include "Azr_Pointer.h"
@@ -8,7 +10,7 @@
 #include "Kismet/KismetMaterialLibrary.h"
 #include "UObject/ConstructorHelpers.h"
 #include "Components/WidgetComponent.h"
-#include "CableComponent.h"
+
 #include "Materials/MaterialParameterCollection.h"
 #include "Materials/MaterialInterface.h"
 #include "Engine/StaticMesh.h"
@@ -18,9 +20,7 @@
 #include "Azr_Indicator.h" 
 #include "Engine/BlueprintGeneratedClass.h" 
 #include "GameFramework/PlayerController.h" 
-#include "Azr_ExplainWidget.h" 
-#include "Azr_ActionWidget.h"
-#include "Azr_LabelWidget.h"
+
 // --------------------
 
 UAzr_Gaze::UAzr_Gaze()
@@ -39,7 +39,7 @@ UAzr_Gaze::UAzr_Gaze()
 	DrainRate = 1.5f;
 	bResetOnTrigger = true;
 	HighlightSpeed = 1.2f;
-	HighlightMode = EAzr_HighlightMode::AllComponents;
+	
 	SpawnedIndicator = nullptr;
 
 	StencilID = 252;
@@ -49,33 +49,12 @@ UAzr_Gaze::UAzr_Gaze()
 	// Initialize Hover Memory
 	bWasLookedAt = false;
 
-	// --- INTERNAL COMPONENTS (Tether System) ---
-	StartAnchor = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("TetherStartAnchor"));
-	StartAnchor->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	StartAnchor->SetCastShadow(false);
-	StartAnchor->SetVisibility(false);
-
-	EndAnchor = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("TetherEndAnchor"));
-	EndAnchor->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	EndAnchor->SetCastShadow(false);
-	EndAnchor->SetVisibility(false);
-
-	TetherCable = CreateDefaultSubobject<UCableComponent>(TEXT("TetherCable"));
-	TetherCable->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	TetherCable->SetVisibility(false);
-	TetherCable->NumSegments = 1;
-	TetherCable->CableLength = 0.0f;
-
+	
 	// --- ASSET INITIALIZATION ---
 	static ConstructorHelpers::FObjectFinder<UMaterialParameterCollection> MPCAsset(TEXT("/AzurealXR/Interaction/Highlight/MPC_Highlight"));
 	if (MPCAsset.Succeeded()) HighlightMPC = MPCAsset.Object;
 
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMesh(TEXT("/AzurealXR/Interaction/Cable_System/CableHead"));
-	if (SphereMesh.Succeeded()) TetherSettings.AnchorMesh = SphereMesh.Object;
-
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> CableMatAsset(TEXT("/AzurealXR/Interaction/Cable_System/M_Cable"));
-	if (CableMatAsset.Succeeded()) TetherSettings.CableMaterial = CableMatAsset.Object;
-
+	
 	// --- AUDIO ASSETS ---
 	static ConstructorHelpers::FObjectFinder<USoundBase> HighlightStartAsset(TEXT("/AzurealXR/Interaction/Highlight/SC_Highlight_Start"));
 	if (HighlightStartAsset.Succeeded()) SoundHighlightStart = HighlightStartAsset.Object;
@@ -137,35 +116,7 @@ void UAzr_Gaze::EnableGaze()
 	SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	SetCollisionProfileName(FName("Azr_Collision"));
 
-	// 2. Wake up World UI & Indicators
-	// 2. Wake up World UI & Indicators
-	CurrentTargetWidget = FindWidgetByName(TetherSettings.TargetWidgetName);
-	if (CurrentTargetWidget)
-	{
-		CurrentTargetWidget->SetVisibility(true);
-
-		// --- NEW: INJECT DYNAMIC TEXT FOR ANY WIDGET TYPE ---
-		if (UWidgetComponent* WidgetComp = Cast<UWidgetComponent>(CurrentTargetWidget))
-		{
-			UUserWidget* UserUI = WidgetComp->GetUserWidgetObject();
-
-			// 1. Is it an Explain Widget?
-			if (UAzr_ExplainWidget* ExplainUI = Cast<UAzr_ExplainWidget>(UserUI))
-			{
-				ExplainUI->SetExplainText(GazeDescription);
-			}
-			// 2. Is it an Action Widget?
-			else if (UAzr_ActionWidget* ActionUI = Cast<UAzr_ActionWidget>(UserUI))
-			{
-				ActionUI->SetActionDescription(GazeDescription);
-			}
-			// 3. Is it a Label Widget?
-			else if (UAzr_LabelWidget* LabelUI = Cast<UAzr_LabelWidget>(UserUI))
-			{
-				LabelUI->SetLabelText(GazeDescription);
-			}
-		}
-	}
+	
 
 	if (SpawnedIndicator) SpawnedIndicator->SetActorHiddenInGame(false);
 
@@ -182,11 +133,12 @@ void UAzr_Gaze::EnableGaze()
 		}
 	}
 
+	AAzr_Interactable::SetGlobalHiveSpeed(HighlightSpeed);
+
 	// 3. Activate Visual Feedback & Shift Pointer
 	ToggleHighlight(true);
-	ToggleTether(true);
 	UpdatePointerZOffset(true);
-	UpdatePointer(false);
+	UpdatePointer();
 
 	SetComponentTickEnabled(true);
 }
@@ -199,40 +151,63 @@ void UAzr_Gaze::DisableGaze()
 	CurrentChargeTime = 0.0f;
 	OnGazeProgressUpdated.Broadcast(0.0f);
 
-	// --- CLEANUP HAPTICS (RAW HARDWARE COMMAND) ---
 	if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
 	{
 		PC->SetHapticsByValue(0.0f, 0.0f, EControllerHand::Left);
 		PC->SetHapticsByValue(0.0f, 0.0f, EControllerHand::Right);
 	}
 
-	// --- CLEANUP AUTO UI & INDICATOR ---
 	if (SpawnedIndicator)
 	{
 		if (bWasLookedAt) SpawnedIndicator->OnShrink();
 		SpawnedIndicator->SetActorHiddenInGame(true);
 	}
 
-	if (AAzr_Pawn* Pawn = Cast<AAzr_Pawn>(UGameplayStatics::GetPlayerPawn(this, 0)))
+	if (bIsBeingLookedAt || bWasLookedAt)
 	{
-		if (Pawn->GazeReticleWidget)
+		TArray<UAzr_Gaze*> WakeZones;
+		GetOwner()->GetComponents(WakeZones);
+		for (UAzr_Gaze* Zone : WakeZones)
 		{
-			if (UAzr_GazeWidget* GazeUI = Cast<UAzr_GazeWidget>(Pawn->GazeReticleWidget->GetUserWidgetObject())) GazeUI->SetProgress(0.0f);
-			Pawn->GazeReticleWidget->SetVisibility(false);
+			if (Zone != this && Zone->bIsGazeEnabled) Zone->ToggleHighlight(true);
 		}
 	}
 
-	// 1. Kill Collision
+	// --- THE SIBLING CHECK ---
+	bool bOtherZonesActive = false;
+	TArray<UAzr_Gaze*> AllZones;
+	GetOwner()->GetComponents(AllZones);
+	for (UAzr_Gaze* Zone : AllZones)
+	{
+		if (Zone != this && Zone->bIsGazeEnabled)
+		{
+			bOtherZonesActive = true;
+			break;
+		}
+	}
+
+	// Only turn off global systems if we are the LAST active zone!
+	if (!bOtherZonesActive)
+	{
+		if (UAzr_Pointer* Pointer = FindPlayerPointer()) Pointer->DisablePointer();
+
+		if (AAzr_Pawn* Pawn = Cast<AAzr_Pawn>(UGameplayStatics::GetPlayerPawn(this, 0)))
+		{
+			if (Pawn->GazeReticleWidget)
+			{
+				if (UAzr_GazeWidget* GazeUI = Cast<UAzr_GazeWidget>(Pawn->GazeReticleWidget->GetUserWidgetObject())) GazeUI->SetProgress(0.0f);
+				Pawn->GazeReticleWidget->SetVisibility(false);
+			}
+		}
+
+		// FIXED: Only drop the pointer offset if NO OTHER zones need it!
+		UpdatePointerZOffset(false);
+	}
+
 	SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	SetCollisionProfileName(FName("NoCollision"));
 
-	// 2. Kill Visuals & Reset Pointer Shift
 	ToggleHighlight(false);
-	ToggleTether(false);
-	if (CurrentTargetWidget) CurrentTargetWidget->SetVisibility(false);
-
-	UpdatePointerZOffset(false);
-	if (UAzr_Pointer* Pointer = FindPlayerPointer()) Pointer->DisablePointer();
 
 	SetComponentTickEnabled(false);
 }
@@ -254,35 +229,36 @@ void UAzr_Gaze::TickComponent(float DeltaTime, ELevelTick TickType, FActorCompon
 	if (bIsBeingLookedAt && !bWasLookedAt)
 	{
 		if (SpawnedIndicator) SpawnedIndicator->OnExpand();
-
-		// Play sound EVERY time we hover in
 		if (SoundGazeStart) UGameplayStatics::SpawnSoundAttached(SoundGazeStart, this);
+
+		// NEW: Turn OFF highlight for all other active zones
+		TArray<UAzr_Gaze*> AllZones;
+		GetOwner()->GetComponents(AllZones);
+		for (UAzr_Gaze* Zone : AllZones)
+		{
+			if (Zone != this && Zone->bIsGazeEnabled) Zone->ToggleHighlight(false);
+		}
 	}
 	else if (!bIsBeingLookedAt && bWasLookedAt)
 	{
 		if (SpawnedIndicator) SpawnedIndicator->OnShrink();
 
-		// THE CUT-OFF: Stop Dual Vibration instantly when looking away
 		if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
 		{
 			PC->SetHapticsByValue(0.0f, 0.0f, EControllerHand::Left);
 			PC->SetHapticsByValue(0.0f, 0.0f, EControllerHand::Right);
 		}
-	}
 
-	// --- 2. DYNAMIC TETHER ---
-	if (CurrentTargetWidget && TetherSettings.bEnableTether && EndAnchor)
-	{
-		if (APlayerCameraManager* CamManager = UGameplayStatics::GetPlayerCameraManager(this, 0))
+		// NEW: Turn ON highlight for all other active zones
+		TArray<UAzr_Gaze*> AllZones;
+		GetOwner()->GetComponents(AllZones);
+		for (UAzr_Gaze* Zone : AllZones)
 		{
-			FVector StartLoc = CurrentTargetWidget->GetComponentLocation();
-			FRotator NewRot = UKismetMathLibrary::FindLookAtRotation(StartLoc, CamManager->GetCameraLocation());
-			CurrentTargetWidget->SetWorldRotation(NewRot);
+			if (Zone != this && Zone->bIsGazeEnabled) Zone->ToggleHighlight(true);
 		}
-
-		FVector DynamicEndPos = CalculateSurfaceAnchor(CurrentTargetWidget, TetherSettings.WidgetAnchorPos, TetherSettings);
-		EndAnchor->SetWorldLocation(DynamicEndPos);
 	}
+
+	
 
 	// --- 3. PROGRESS MATH & CONTINUOUS MAX HAPTICS ---
 	if (!bHasTriggered)
@@ -293,7 +269,7 @@ void UAzr_Gaze::TickComponent(float DeltaTime, ELevelTick TickType, FActorCompon
 		{
 			if (CurrentChargeTime == 0.0f)
 			{
-				UpdatePointer(true);
+				UpdatePointer();
 			}
 
 			CurrentChargeTime += DeltaTime;
@@ -313,7 +289,7 @@ void UAzr_Gaze::TickComponent(float DeltaTime, ELevelTick TickType, FActorCompon
 				if (CurrentChargeTime <= 0.0f)
 				{
 					CurrentChargeTime = 0.0f;
-					UpdatePointer(false);
+				
 				}
 			}
 		}
@@ -349,7 +325,7 @@ void UAzr_Gaze::TickComponent(float DeltaTime, ELevelTick TickType, FActorCompon
 					PC->SetHapticsByValue(0.0f, 0.0f, EControllerHand::Right);
 				}
 
-				OnGazeTriggered.Broadcast();
+				OnGazeTriggered.Broadcast(this);
 
 				if (bResetOnTrigger)
 				{
@@ -370,13 +346,31 @@ void UAzr_Gaze::TickComponent(float DeltaTime, ELevelTick TickType, FActorCompon
 	}
 
 	// --- 4. HIGHLIGHT PULSE ---
-	if (!bIsBeingLookedAt && HighlightMPC)
+
+	// Check if ANY sibling is actively being looked at
+	bool bAnySiblingLookedAt = false;
+	TArray<UAzr_Gaze*> AllZones;
+	GetOwner()->GetComponents(AllZones);
+	for (UAzr_Gaze* Zone : AllZones)
+	{
+		
+		if (Zone != this && Zone->bIsGazeEnabled && (Zone->bIsBeingLookedAt || Zone->bWasLookedAt))
+		{
+			bAnySiblingLookedAt = true;
+			break;
+		}
+	}
+
+	// Only pulse if NO zones are currently being looked at
+	if (!bIsBeingLookedAt && HighlightMPC && !bAnySiblingLookedAt)
 	{
 		if (UWorld* World = GetWorld())
 		{
+			// REVERTED: Restored the Global Hive Mind Synchronization!
 			float CurrentSpeed = AAzr_Interactable::GetGlobalHiveSpeed();
 			float Phase = (World->GetTimeSeconds() * CurrentSpeed * UE_TWO_PI) - UE_HALF_PI;
 			float CurrentValue = (FMath::Sin(Phase) + 1.0f) / 2.0f;
+
 			UKismetMaterialLibrary::SetScalarParameterValue(World, HighlightMPC, FName("Alpha"), CurrentValue);
 
 			bool bIsRising = (CurrentValue > LastHighlightValue);
@@ -393,6 +387,8 @@ void UAzr_Gaze::TickComponent(float DeltaTime, ELevelTick TickType, FActorCompon
 	}
 	else if (bIsBeingLookedAt && HighlightMPC)
 	{
+		// Pin the global MPC to 1.0. 
+		// (The siblings will have their CustomDepth turned off by the Hover logic, so only THIS one will glow!)
 		UKismetMaterialLibrary::SetScalarParameterValue(GetWorld(), HighlightMPC, FName("Alpha"), 1.0f);
 	}
 
@@ -407,22 +403,15 @@ void UAzr_Gaze::EnsureInitialized()
 {
 	if (!GetOwner()) return;
 
-	if (StartAnchor->GetAttachParent() == nullptr)
-	{
-		StartAnchor->AttachToComponent(this, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-		EndAnchor->AttachToComponent(this, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-		TetherCable->AttachToComponent(StartAnchor, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-	}
-
 	if (!TargetMesh) TargetMesh = FindMeshByName(TargetMeshName);
 
 	if (!TargetMesh)
 	{
-		TArray<UStaticMeshComponent*> MeshComps;
-		GetOwner()->GetComponents<UStaticMeshComponent>(MeshComps);
-		for (UStaticMeshComponent* Mesh : MeshComps)
+		TArray<UMeshComponent*> MeshComps; // <--- Changed to UMeshComponent
+		GetOwner()->GetComponents<UMeshComponent>(MeshComps);
+		for (UMeshComponent* Mesh : MeshComps)
 		{
-			if (Mesh && Mesh != StartAnchor && Mesh != EndAnchor)
+			if (Mesh)
 			{
 				TargetMesh = Mesh;
 				break;
@@ -433,13 +422,13 @@ void UAzr_Gaze::EnsureInitialized()
 
 // --- VISUAL HELPERS ---
 
-void UAzr_Gaze::UpdatePointer(bool bIsLooking)
+void UAzr_Gaze::UpdatePointer()
 {
-	UAzr_Pointer* Pointer = FindPlayerPointer();
-	if (!Pointer) return;
-
-	USceneComponent* Target = TargetMesh ? Cast<USceneComponent>(TargetMesh) : this;
-	Pointer->EnablePointer_TargetComponent(Target);
+	if (UAzr_Pointer* Pointer = FindPlayerPointer())
+	{
+		USceneComponent* Target = TargetMesh ? Cast<USceneComponent>(TargetMesh) : this;
+		Pointer->EnablePointer_TargetComponent(Target);
+	}
 }
 
 void UAzr_Gaze::UpdatePointerZOffset(bool bIsGazeMode)
@@ -457,62 +446,26 @@ void UAzr_Gaze::UpdatePointerZOffset(bool bIsGazeMode)
 	}
 }
 
-void UAzr_Gaze::ToggleTether(bool bState)
-{
-	if (!bState || !TetherSettings.bEnableTether)
-	{
-		StartAnchor->SetVisibility(false); EndAnchor->SetVisibility(false); TetherCable->SetVisibility(false); return;
-	}
 
-	USceneComponent* MeshTarget = TargetMesh ? Cast<USceneComponent>(TargetMesh) : this;
-	USceneComponent* WidgetTarget = FindWidgetByName(TetherSettings.TargetWidgetName);
-	if (!MeshTarget || !WidgetTarget) return;
-
-	if (TetherSettings.AnchorMesh) { StartAnchor->SetStaticMesh(TetherSettings.AnchorMesh); EndAnchor->SetStaticMesh(TetherSettings.AnchorMesh); }
-	StartAnchor->SetWorldScale3D(FVector(TetherSettings.AnchorScale));
-	EndAnchor->SetWorldScale3D(FVector(TetherSettings.AnchorScale));
-	if (TetherSettings.CableMaterial) TetherCable->SetMaterial(0, TetherSettings.CableMaterial);
-	TetherCable->CableWidth = TetherSettings.CableWidth;
-
-	bool bStartCorrect = (StartAnchor->GetAttachParent() == MeshTarget);
-	bool bEndCorrect = (EndAnchor->GetAttachParent() == WidgetTarget);
-
-	if (!bStartCorrect || !bEndCorrect)
-	{
-		FVector StartPos = CalculateSurfaceAnchor(MeshTarget, TetherSettings.MeshAnchorPos, TetherSettings);
-		FVector EndPos = CalculateSurfaceAnchor(WidgetTarget, TetherSettings.WidgetAnchorPos, TetherSettings);
-
-		if (!bStartCorrect) StartAnchor->AttachToComponent(MeshTarget, FAttachmentTransformRules::KeepWorldTransform);
-		if (!bEndCorrect) EndAnchor->AttachToComponent(WidgetTarget, FAttachmentTransformRules::KeepWorldTransform);
-
-		StartAnchor->SetWorldLocation(StartPos);
-		EndAnchor->SetWorldLocation(EndPos);
-	}
-
-	TetherCable->SetAttachEndToComponent(EndAnchor);
-	TetherCable->SetRelativeLocation(FVector::ZeroVector);
-	TetherCable->EndLocation = FVector::ZeroVector;
-
-	StartAnchor->SetVisibility(true); EndAnchor->SetVisibility(true); TetherCable->SetVisibility(true);
-}
 
 void UAzr_Gaze::ToggleHighlight(bool bState)
 {
-	if (HighlightMode == EAzr_HighlightMode::None) return;
+	TArray<UMeshComponent*> MeshesToHighlight;
 
-	TArray<UMeshComponent*> Meshes;
-	if (HighlightMode == EAzr_HighlightMode::AllComponents)
+	if (HighlightMode == EAzr_HighlightMode::TargetMeshOnly)
 	{
-		GetOwner()->GetComponents(Meshes);
+		// Since TargetMesh is now guaranteed to be a UMeshComponent, no casting is needed
+		if (TargetMesh) MeshesToHighlight.Add(TargetMesh);
 	}
-	else if (TargetMesh)
+	else if (GetOwner())
 	{
-		Meshes.Add(Cast<UMeshComponent>(TargetMesh));
+		// Highlight ALL meshes attached to the parent Actor
+		GetOwner()->GetComponents(MeshesToHighlight);
 	}
 
-	for (UMeshComponent* Mesh : Meshes)
+	for (UMeshComponent* Mesh : MeshesToHighlight)
 	{
-		if (Mesh && Mesh != StartAnchor && Mesh != EndAnchor)
+		if (Mesh)
 		{
 			Mesh->SetRenderCustomDepth(bState);
 			Mesh->SetCustomDepthStencilValue(StencilID);
@@ -640,83 +593,23 @@ void UAzr_Gaze::GenerateIndicatorPreview()
 	}
 }
 
-// --- MATH & UTILS ---
 
-FVector UAzr_Gaze::CalculateSurfaceAnchor(USceneComponent* Target, EAzr_TetherPos Pos, const FAzr_TetherConfig& Config)
-{
-	if (!Target) return FVector::ZeroVector;
 
-	if (UWidgetComponent* WidgetComp = Cast<UWidgetComponent>(Target))
-	{
-		FVector2D DrawSize = WidgetComp->GetCurrentDrawSize();
-		FVector Scale = WidgetComp->GetComponentScale();
-		FVector2D Pivot = WidgetComp->GetPivot();
-
-		float WorldHalfWidth = (DrawSize.X * 0.5f) * Scale.Y;
-		float WorldHalfHeight = (DrawSize.Y * 0.5f) * Scale.Z;
-
-		FVector Center = WidgetComp->GetComponentLocation();
-		FVector RightVec = WidgetComp->GetRightVector();
-		FVector UpVec = WidgetComp->GetUpVector();
-		FVector ForwardVec = WidgetComp->GetForwardVector();
-
-		float PivotShiftX = (0.5f - Pivot.X) * (DrawSize.X * Scale.Y);
-		float PivotShiftY = (0.5f - Pivot.Y) * (DrawSize.Y * Scale.Z);
-		FVector VisualCenter = Center + (RightVec * PivotShiftX) + (UpVec * PivotShiftY);
-
-		switch (Pos)
-		{
-		case EAzr_TetherPos::Top: return VisualCenter + (UpVec * (WorldHalfHeight + Config.WidgetGap_Vertical));
-		case EAzr_TetherPos::Bottom: return VisualCenter - (UpVec * (WorldHalfHeight + Config.WidgetGap_Vertical));
-		case EAzr_TetherPos::Right: return VisualCenter + (RightVec * (WorldHalfWidth + Config.WidgetGap_Horizontal));
-		case EAzr_TetherPos::Left: return VisualCenter - (RightVec * (WorldHalfWidth + Config.WidgetGap_Horizontal));
-		case EAzr_TetherPos::Front: return VisualCenter + (ForwardVec * 1.0f);
-		case EAzr_TetherPos::Back: return VisualCenter - (ForwardVec * 1.0f);
-		default: return VisualCenter;
-		}
-	}
-
-	FBoxSphereBounds LocalBounds = Target->CalcLocalBounds();
-	FVector WorldCenter = Target->GetComponentTransform().TransformPosition(LocalBounds.Origin);
-	FVector ForwardVec = Target->GetForwardVector();
-	FVector RightVec = Target->GetRightVector();
-	FVector UpVec = Target->GetUpVector();
-	FVector Scale = Target->GetComponentScale();
-
-	float WorldHalfDepth = LocalBounds.BoxExtent.X * FMath::Abs(Scale.X);
-	float WorldHalfWidth = LocalBounds.BoxExtent.Y * FMath::Abs(Scale.Y);
-	float WorldHalfHeight = LocalBounds.BoxExtent.Z * FMath::Abs(Scale.Z);
-
-	FVector SurfacePush = FVector::ZeroVector;
-
-	switch (Pos)
-	{
-	case EAzr_TetherPos::Top: SurfacePush = UpVec * (WorldHalfHeight + Config.MeshSurfaceOffset); break;
-	case EAzr_TetherPos::Bottom: SurfacePush = -UpVec * (WorldHalfHeight + Config.MeshSurfaceOffset); break;
-	case EAzr_TetherPos::Right: SurfacePush = RightVec * (WorldHalfWidth + Config.MeshSurfaceOffset); break;
-	case EAzr_TetherPos::Left: SurfacePush = -RightVec * (WorldHalfWidth + Config.MeshSurfaceOffset); break;
-	case EAzr_TetherPos::Front: SurfacePush = ForwardVec * (WorldHalfDepth + Config.MeshSurfaceOffset); break;
-	case EAzr_TetherPos::Back: SurfacePush = -ForwardVec * (WorldHalfDepth + Config.MeshSurfaceOffset); break;
-	default: break;
-	}
-
-	return WorldCenter + SurfacePush + (UpVec * Config.MeshOffset_Vertical) + (RightVec * Config.MeshOffset_Horizontal);
-}
-
-UPrimitiveComponent* UAzr_Gaze::FindMeshByName(FName Name)
+UMeshComponent* UAzr_Gaze::FindMeshByName(FName Name)
 {
 	if (Name.IsNone()) return nullptr;
-	TArray<UPrimitiveComponent*> Comps; GetOwner()->GetComponents(Comps);
-	for (UPrimitiveComponent* Comp : Comps) if (Comp->GetFName() == Name || Comp->GetName().Contains(Name.ToString())) return Comp;
+	TArray<UMeshComponent*> Comps; // <--- Changed to UMeshComponent
+	GetOwner()->GetComponents(Comps);
+
+	for (UMeshComponent* Comp : Comps)
+	{
+		if (Comp->GetFName() == Name || Comp->GetName().Contains(Name.ToString()))
+			return Comp;
+	}
 	return nullptr;
 }
 
-USceneComponent* UAzr_Gaze::FindWidgetByName(FName Name)
-{
-	TArray<USceneComponent*> Comps; GetOwner()->GetComponents(Comps);
-	for (USceneComponent* Comp : Comps) if (Comp->IsA(UWidgetComponent::StaticClass()) && (Comp->GetFName() == Name || Comp->GetName().Contains(Name.ToString()))) return Cast<USceneComponent>(Comp);
-	return nullptr;
-}
+
 
 UAzr_Pointer* UAzr_Gaze::FindPlayerPointer() const
 {

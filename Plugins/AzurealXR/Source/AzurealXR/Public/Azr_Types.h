@@ -72,12 +72,16 @@ struct FAzr_TetherConfig
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tether")
 	float CableWidth = 35.0f;
 
-	// FIX: Add 'class' to forward declare the type
+
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tether", meta = (ClampMin = "0.0", ClampMax = "100.0", UIMin = "0.0", UIMax = "100.0"))
+	float CableHang = 5.0f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tether")
 	class UMaterialInterface* CableMaterial = nullptr;
 };
 
-// --- NEW: EXPLAIN TIMING MODE ---
+
 UENUM(BlueprintType)
 enum class EAzr_ExplainMode : uint8
 {
@@ -85,33 +89,33 @@ enum class EAzr_ExplainMode : uint8
 	CustomTimer UMETA(DisplayName = "Use Custom Timer")
 };
 
-// --- NEW: EXPLAIN SYSTEM CONFIGURATION ---
+
 USTRUCT(BlueprintType)
 struct FAzr_ExplainStep
 {
 	GENERATED_BODY()
 
-	// The exact name of the UWidgetComponent attached to this Actor
+	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Explain Step")
 	FName WidgetName = "ExplainWidget";
 
-	// NEW: The written explanation text to display on the UI
+	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Explain Step", meta = (MultiLine = true))
 	FText ExplainText;
 
-	// The audio track to play when this specific widget step is active
+	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Explain Step")
 	class USoundBase* AudioTrack = nullptr;
 
-	// --- NEW: TIMING LOGIC ---
+	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Explain Step")
 	EAzr_ExplainMode ExplainMode = EAzr_ExplainMode::Audio;
 
-	// This only shows up in the editor if "Custom Timer" is selected!
+	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Explain Step", meta = (EditCondition = "ExplainMode == EAzr_ExplainMode::CustomTimer", EditConditionHides))
 	float CustomTimerDuration = 5.0f;
 
-	// --- PER-STEP VISUALS ---
+	
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Explain Step|Visuals")
 	TSoftObjectPtr<AActor> ExternalTargetActor;

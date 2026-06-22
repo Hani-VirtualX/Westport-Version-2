@@ -53,7 +53,8 @@ UAzr_Action::UAzr_Action()
 	TetherCable = CreateDefaultSubobject<UCableComponent>(TEXT("Action_TetherCable"));
 	TetherCable->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	TetherCable->SetVisibility(false);
-	TetherCable->NumSegments = 1;
+	TetherCable->NumSegments = 20;
+	TetherCable->SolverIterations = 4;
 	TetherCable->CableLength = 0.0f;
 
 	// --- ASSET INITIALIZATION ---
@@ -137,6 +138,8 @@ void UAzr_Action::EnableAction()
 			ActiveWidgetComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 			ActiveWidgetComp->SetCollisionProfileName(FName("Azr_Collision"));
 		}
+
+		
 	}
 
 	// Turn on Visuals
@@ -219,7 +222,7 @@ void UAzr_Action::TickComponent(float DeltaTime, ELevelTick TickType, FActorComp
 	// --- 2. DYNAMIC TETHER ---
 	if (ActiveWidgetComp && TetherSettings.bEnableTether && EndAnchor)
 	{
-		// Billboard Widget
+		// 1. Keep the Billboard logic
 		if (APlayerCameraManager* CamManager = UGameplayStatics::GetPlayerCameraManager(this, 0))
 		{
 			FVector StartLoc = ActiveWidgetComp->GetComponentLocation();
@@ -227,9 +230,25 @@ void UAzr_Action::TickComponent(float DeltaTime, ELevelTick TickType, FActorComp
 			ActiveWidgetComp->SetWorldRotation(NewRot);
 		}
 
-		// Tether Surface Math
+		// 2. Keep the Surface Math
 		FVector DynamicEndPos = CalculateSurfaceAnchor(ActiveWidgetComp, TetherSettings.WidgetAnchorPos, TetherSettings);
 		EndAnchor->SetWorldLocation(DynamicEndPos);
+
+		// 3. ADD THIS RIGID OVERRIDE (Copied from Explain)
+		float ActualDistance = FVector::Dist(StartAnchor->GetComponentLocation(), DynamicEndPos);
+		float Slack = TetherSettings.CableHang;
+
+		if (Slack <= 0.1f)
+		{
+			// Force the cable to the exact distance with no gravity
+			TetherCable->CableLength = ActualDistance;
+			TetherCable->CableGravityScale = 0.0f;
+		}
+		else
+		{
+			TetherCable->CableLength = ActualDistance + Slack;
+			TetherCable->CableGravityScale = 1.0f;
+		}
 	}
 
 	// --- 3. HIGHLIGHT PULSE ---
@@ -453,6 +472,16 @@ void UAzr_Action::ToggleTether(bool bState)
 
 	TetherCable->CableWidth = TetherSettings.CableWidth;
 
+	// --- PRE-CALCULATE UI ROTATION TO PREVENT FRAME-1 CRASH ---
+	// Forces the dormant widget to update its world transform before we calculate anchors
+	if (WidgetTarget == ActiveWidgetComp) {
+		if (APlayerCameraManager* CamManager = UGameplayStatics::GetPlayerCameraManager(this, 0)) {
+			FVector StartLoc = WidgetTarget->GetComponentLocation();
+			FRotator NewRot = UKismetMathLibrary::FindLookAtRotation(StartLoc, CamManager->GetCameraLocation());
+			WidgetTarget->SetWorldRotation(NewRot);
+		}
+	}
+
 	bool bStartCorrect = (StartAnchor->GetAttachParent() == MeshTarget);
 	bool bEndCorrect = (EndAnchor->GetAttachParent() == WidgetTarget);
 
@@ -472,9 +501,56 @@ void UAzr_Action::ToggleTether(bool bState)
 	TetherCable->SetRelativeLocation(FVector::ZeroVector);
 	TetherCable->EndLocation = FVector::ZeroVector;
 
+	// --- THE FIX: NUKE ALL COLLISION ---
+	TetherCable->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	TetherCable->SetCollisionResponseToAllChannels(ECR_Ignore);
+	TetherCable->bEnableCollision = false;
+
+	// --- PERCENTAGE MATH & STIFF HANG ---
+	float HangPercentage = TetherSettings.CableHang / 100.0f;
+	float InitialDist = FVector::Dist(StartAnchor->GetComponentLocation(), EndAnchor->GetComponentLocation());
+
+	if (HangPercentage <= 0.001f) {
+		// 0% Hang = 1 Segment Straight Line
+		TetherCable->NumSegments = 1;
+		TetherCable->CableLength = InitialDist;
+		TetherCable->CableGravityScale = 0.0f;
+		TetherCable->bEnableStiffness = false;
+	}
+	else {
+		// > 0% Hang = 20 Segments
+		TetherCable->NumSegments = 20;
+
+		// Calculate slack based on the percentage of the distance!
+		float SlackAmount = InitialDist * HangPercentage;
+		TetherCable->CableLength = InitialDist + SlackAmount;
+
+		// Gentle gravity scaling based on percentage
+		TetherCable->CableGravityScale = FMath::Clamp(HangPercentage * 0.5f, 0.01f, 0.5f);
+
+		// --- THE STIFF HANG FIX ---
+		TetherCable->bEnableStiffness = true;
+		TetherCable->SolverIterations = 16;
+	}
+
+	TetherCable->RecreatePhysicsState();
+
+	
 	StartAnchor->SetVisibility(true);
 	EndAnchor->SetVisibility(true);
-	TetherCable->SetVisibility(true);
+
+	
+	TetherCable->SetVisibility(false);
+
+	if (UWorld* World = GetWorld()) {
+		FTimerHandle SettleTimer;
+		World->GetTimerManager().SetTimer(SettleTimer, FTimerDelegate::CreateWeakLambda(this, [this]() {
+			// Only turn it on if the Action UI is still active
+			if (bIsActive && TetherCable) {
+				TetherCable->SetVisibility(true);
+			}
+			}), 0.20f, false);
+	}
 }
 
 void UAzr_Action::ToggleHighlight(bool bState)

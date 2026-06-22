@@ -213,6 +213,7 @@ private:
 	bool bIsGrabEnabled = false;
 	bool bIsGrabbed = false;
 	bool bIsTriggerEngaged = false;
+	bool bHasTetherSettled = false;
 
 	UPROPERTY()
 	TArray<USceneComponent*> ActiveHands;

@@ -43,7 +43,8 @@ UAzr_Touch::UAzr_Touch()
 	TetherCable = CreateDefaultSubobject<UCableComponent>(TEXT("TetherCable"));
 	TetherCable->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	TetherCable->SetVisibility(false);
-	TetherCable->NumSegments = 1;
+	TetherCable->NumSegments = 20;
+	TetherCable->SolverIterations = 4;
 	TetherCable->CableLength = 0.0f;
 
 	// --- ASSET INITIALIZATION ---
@@ -222,6 +223,7 @@ void UAzr_Touch::DisableTouch()
 {
 	if (!bIsTouchEnabled) return;
 	bIsTouchEnabled = false;
+	bHasTetherSettled = false;
 
 	// 1. Sleep the matched collision
 	if (LinkedTouchZone)
@@ -320,6 +322,25 @@ void UAzr_Touch::TickComponent(float DeltaTime, ELevelTick TickType, FActorCompo
 		{
 			FVector DynamicEndPos = CalculateSurfaceAnchor(CurrentTargetWidget, TetherSettings.WidgetAnchorPos, TetherSettings);
 			EndAnchor->SetWorldLocation(DynamicEndPos);
+
+			// --- RIGID OVERRIDE ---
+			float ActualDistance = FVector::Dist(StartAnchor->GetComponentLocation(), DynamicEndPos);
+			float Slack = TetherSettings.CableHang;
+
+			if (Slack <= 0.1f)
+			{
+				TetherCable->CableLength = ActualDistance;
+				TetherCable->CableGravityScale = 0.0f;
+			}
+			else
+			{
+				TetherCable->CableLength = ActualDistance + Slack;
+				TetherCable->CableGravityScale = 1.0f;
+			}
+
+			// Flush physics momentum to kill wobble
+			TetherCable->SetRelativeLocation(FVector::ZeroVector);
+			TetherCable->EndLocation = FVector::ZeroVector;
 		}
 	}
 
@@ -354,7 +375,9 @@ void UAzr_Touch::ToggleTether(bool bState)
 {
 	if (!bState || !TetherSettings.bEnableTether)
 	{
-		StartAnchor->SetVisibility(false); EndAnchor->SetVisibility(false); TetherCable->SetVisibility(false);
+		StartAnchor->SetVisibility(false);
+		EndAnchor->SetVisibility(false);
+		TetherCable->SetVisibility(false);
 		return;
 	}
 
@@ -374,9 +397,60 @@ void UAzr_Touch::ToggleTether(bool bState)
 	if (EndAnchor->GetAttachParent() != WidgetTarget) EndAnchor->AttachToComponent(WidgetTarget, FAttachmentTransformRules::KeepWorldTransform);
 
 	StartAnchor->SetWorldLocation(CalculateSurfaceAnchor(MeshTarget, TetherSettings.MeshAnchorPos, TetherSettings));
-	TetherCable->SetAttachEndToComponent(EndAnchor);
 
-	StartAnchor->SetVisibility(true); EndAnchor->SetVisibility(true); TetherCable->SetVisibility(true);
+	TetherCable->SetAttachEndToComponent(EndAnchor);
+	TetherCable->SetRelativeLocation(FVector::ZeroVector);
+	TetherCable->EndLocation = FVector::ZeroVector;
+
+	// --- THE FIX: NUKE ALL COLLISION ---
+	TetherCable->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	TetherCable->SetCollisionResponseToAllChannels(ECR_Ignore);
+	TetherCable->bEnableCollision = false;
+
+	// --- PERCENTAGE MATH & STIFF HANG ---
+	float HangPercentage = TetherSettings.CableHang / 100.0f;
+	float InitialDist = FVector::Dist(StartAnchor->GetComponentLocation(), EndAnchor->GetComponentLocation());
+
+	if (HangPercentage <= 0.001f) {
+		TetherCable->NumSegments = 1;
+		TetherCable->CableLength = InitialDist;
+		TetherCable->CableGravityScale = 0.0f;
+		TetherCable->bEnableStiffness = false;
+	}
+	else {
+		TetherCable->NumSegments = 20;
+		float SlackAmount = InitialDist * HangPercentage;
+		TetherCable->CableLength = InitialDist + SlackAmount;
+		TetherCable->CableGravityScale = FMath::Clamp(HangPercentage * 0.5f, 0.01f, 0.5f);
+		TetherCable->bEnableStiffness = true;
+		TetherCable->SolverIterations = 16;
+	}
+
+	TetherCable->RecreatePhysicsState();
+
+	StartAnchor->SetVisibility(true);
+	EndAnchor->SetVisibility(true);
+
+	// --- THE FIRST-TIME ONLY TIMER LOGIC ---
+	if (!bHasTetherSettled)
+	{
+		bHasTetherSettled = true;
+		TetherCable->SetVisibility(false);
+
+		if (UWorld* World = GetWorld()) {
+			FTimerHandle SettleTimer;
+			World->GetTimerManager().SetTimer(SettleTimer, FTimerDelegate::CreateWeakLambda(this, [this]() {
+				// Only turn it on if Touch is still active
+				if (bIsTouchEnabled && TetherCable) {
+					TetherCable->SetVisibility(true);
+				}
+				}), 0.20f, false);
+		}
+	}
+	else
+	{
+		TetherCable->SetVisibility(true);
+	}
 }
 
 // --- SURFACE ANCHOR MATH (SYNCED WITH LATCH/GRAB) ---

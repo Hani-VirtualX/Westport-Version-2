@@ -245,6 +245,7 @@ private:
 	bool bIsAttached = false;
 	bool bIsGrabEnabled = false;
 	bool bIsAttachMode = false;
+	bool bHasTetherSettled = false;
 	int32 ActiveAttachID = 0;
 
 	bool bIsGrabRemoveMode = false;

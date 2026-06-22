@@ -110,6 +110,7 @@ private:
 
 	// --- STATE ---
 	bool bIsTouchEnabled = false;
+	bool bHasTetherSettled = false;
 
 	UPROPERTY()
 	TArray<USceneComponent*> ActiveHands;

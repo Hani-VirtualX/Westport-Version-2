@@ -58,10 +58,8 @@ UAzr_AttachTarget::UAzr_AttachTarget()
 	TetherCable = CreateDefaultSubobject<UCableComponent>(TEXT("TetherCable"));
 	TetherCable->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	TetherCable->SetVisibility(false);
-
-	TetherCable->bEnableStiffness = true;
-	TetherCable->NumSegments = 1;
-	TetherCable->SolverIterations = 1;
+	TetherCable->NumSegments = 20;
+	TetherCable->SolverIterations = 4;
 	TetherCable->CableLength = 0.0f;
 	TetherCable->EndLocation = FVector::ZeroVector;
 	TetherCable->CableWidth = TetherSettings.CableWidth;
@@ -164,12 +162,32 @@ void UAzr_AttachTarget::TickComponent(float DeltaTime, ELevelTick TickType, FAct
 			CurrentWidget->SetWorldRotation(NewRot);
 		}
 
+		
 		// --- FIX: Dynamically update the tether anchor every frame! ---
 		// Bypasses the 1-frame Slate bug and allows the tether to adapt to dynamically resized UI
 		if (EndAnchor && TetherSettings.bEnableTether && bForceShowTether)
 		{
 			FVector DynamicEndPos = CalculateSurfaceAnchor(CurrentWidget, TetherSettings.WidgetAnchorPos);
 			EndAnchor->SetWorldLocation(DynamicEndPos);
+
+			// --- RIGID OVERRIDE ---
+			float ActualDistance = FVector::Dist(StartAnchor->GetComponentLocation(), DynamicEndPos);
+			float Slack = TetherSettings.CableHang;
+
+			if (Slack <= 0.1f)
+			{
+				TetherCable->CableLength = ActualDistance;
+				TetherCable->CableGravityScale = 0.0f;
+			}
+			else
+			{
+				TetherCable->CableLength = ActualDistance + Slack;
+				TetherCable->CableGravityScale = 1.0f;
+			}
+
+			// Flush physics momentum to kill wobble
+			TetherCable->SetRelativeLocation(FVector::ZeroVector);
+			TetherCable->EndLocation = FVector::ZeroVector;
 		}
 	}
 }
@@ -333,10 +351,57 @@ void UAzr_AttachTarget::UpdateTetherVisuals()
 	TetherCable->SetRelativeLocation(FVector::ZeroVector);
 	TetherCable->EndLocation = FVector::ZeroVector;
 
+	// --- NUKE ALL COLLISION ---
+	TetherCable->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	TetherCable->SetCollisionResponseToAllChannels(ECR_Ignore);
+	TetherCable->bEnableCollision = false;
+
+	// --- PERCENTAGE MATH & STIFF HANG ---
+	float HangPercentage = TetherSettings.CableHang / 100.0f;
+	float InitialDist = FVector::Dist(StartAnchor->GetComponentLocation(), EndAnchor->GetComponentLocation());
+
+	if (HangPercentage <= 0.001f) {
+		TetherCable->NumSegments = 1;
+		TetherCable->CableLength = InitialDist;
+		TetherCable->CableGravityScale = 0.0f;
+		TetherCable->bEnableStiffness = false;
+	}
+	else {
+		TetherCable->NumSegments = 20;
+		float SlackAmount = InitialDist * HangPercentage;
+		TetherCable->CableLength = InitialDist + SlackAmount;
+		TetherCable->CableGravityScale = FMath::Clamp(HangPercentage * 0.5f, 0.01f, 0.5f);
+		TetherCable->bEnableStiffness = true;
+		TetherCable->SolverIterations = 16;
+	}
+
+	TetherCable->RecreatePhysicsState();
+
 	StartAnchor->SetVisibility(true);
 	EndAnchor->SetVisibility(true);
-	TetherCable->SetVisibility(true);
+
+	// --- THE FIRST-TIME ONLY TIMER LOGIC ---
+	if (!bHasTetherSettled)
+	{
+		bHasTetherSettled = true;
+		TetherCable->SetVisibility(false);
+
+		if (UWorld* World = GetWorld()) {
+			FTimerHandle SettleTimer;
+			World->GetTimerManager().SetTimer(SettleTimer, FTimerDelegate::CreateWeakLambda(this, [this]() {
+				// Only show if the slot hasn't been filled during this 0.2s window
+				if (!bIsFilled && bForceShowTether && TetherCable) {
+					TetherCable->SetVisibility(true);
+				}
+				}), 0.20f, false);
+		}
+	}
+	else
+	{
+		TetherCable->SetVisibility(true);
+	}
 }
+
 
 // --- MASTERPIECE: Fully Upgraded Local Bounds Math ---
 FVector UAzr_AttachTarget::CalculateSurfaceAnchor(USceneComponent* Target, EAzr_TetherPos Pos)
@@ -564,6 +629,10 @@ void UAzr_AttachTarget::SetSlotFilled(bool bFilled)
 	bIsFilled = bFilled;
 	SetGhostVisibility(!bIsFilled);
 	SetTetherAndWidgetVisibility(false);
+
+	if (bFilled) {
+		bHasTetherSettled = false;
+	}
 }
 
 void UAzr_AttachTarget::SetGhostVisibility(bool bShouldBeVisible)

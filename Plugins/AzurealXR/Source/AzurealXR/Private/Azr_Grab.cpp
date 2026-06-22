@@ -75,8 +75,9 @@ UAzr_Grab::UAzr_Grab()
 	TetherCable = CreateDefaultSubobject<UCableComponent>(TEXT("TetherCable"));
 	TetherCable->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	TetherCable->SetVisibility(false);
-	TetherCable->NumSegments = 1;
-	TetherCable->bEnableStiffness = true;
+	TetherCable->NumSegments = 20;
+	TetherCable->SolverIterations = 4;
+	TetherCable->CableLength = 0.0f;
 
 	// --- RESTORED: HARDCODED TETHER ASSETS ---
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMesh(TEXT("/AzurealXR/Interaction/Cable_System/CableHead"));
@@ -436,6 +437,7 @@ void UAzr_Grab::DisableGrab()
 {
 	if (!bIsGrabEnabled) return;
 	bIsGrabEnabled = false;
+	bHasTetherSettled = false;
 
 	SetComponentTickEnabled(false);
 
@@ -875,6 +877,26 @@ void UAzr_Grab::TickComponent(float DeltaTime, ELevelTick TickType, FActorCompon
 			{
 				FVector DynamicEndPos = CalculateSurfaceAnchor(CurrentTargetWidget, ActiveTether->WidgetAnchorPos, *ActiveTether);
 				EndAnchor->SetWorldLocation(DynamicEndPos);
+
+				// --- RIGID OVERRIDE ---
+				float ActualDistance = FVector::Dist(StartAnchor->GetComponentLocation(), DynamicEndPos);
+				float Slack = ActiveTether->CableHang;
+
+				if (Slack <= 0.1f)
+				{
+					// Force the cable to the exact distance with no gravity
+					TetherCable->CableLength = ActualDistance;
+					TetherCable->CableGravityScale = 0.0f;
+				}
+				else
+				{
+					TetherCable->CableLength = ActualDistance + Slack;
+					TetherCable->CableGravityScale = 1.0f;
+				}
+
+				// Flush physics momentum to kill wobble
+				TetherCable->SetRelativeLocation(FVector::ZeroVector);
+				TetherCable->EndLocation = FVector::ZeroVector;
 			}
 		}
 	}
@@ -1014,9 +1036,65 @@ void UAzr_Grab::ToggleTether(bool bState, const FAzr_TetherConfig& TetherConfig)
 	TetherCable->SetRelativeLocation(FVector::ZeroVector);
 	TetherCable->EndLocation = FVector::ZeroVector;
 
+	// --- THE FIX: NUKE ALL COLLISION ---
+	TetherCable->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	TetherCable->SetCollisionResponseToAllChannels(ECR_Ignore);
+	TetherCable->bEnableCollision = false;
+
+	// --- PERCENTAGE MATH & STIFF HANG ---
+	float HangPercentage = TetherConfig.CableHang / 100.0f;
+	float InitialDist = FVector::Dist(StartAnchor->GetComponentLocation(), EndAnchor->GetComponentLocation());
+
+	if (HangPercentage <= 0.001f) {
+		// 0% Hang = 1 Segment Straight Line
+		TetherCable->NumSegments = 1;
+		TetherCable->CableLength = InitialDist;
+		TetherCable->CableGravityScale = 0.0f;
+		TetherCable->bEnableStiffness = false;
+	}
+	else {
+		// > 0% Hang = 20 Segments
+		TetherCable->NumSegments = 20;
+
+		// Calculate slack based on the percentage of the distance!
+		float SlackAmount = InitialDist * HangPercentage;
+		TetherCable->CableLength = InitialDist + SlackAmount;
+
+		// Gentle gravity scaling based on percentage
+		TetherCable->CableGravityScale = FMath::Clamp(HangPercentage * 0.5f, 0.01f, 0.5f);
+
+		// --- THE STIFF HANG FIX ---
+		TetherCable->bEnableStiffness = true;
+		TetherCable->SolverIterations = 16;
+	}
+
+	TetherCable->RecreatePhysicsState();
+
 	StartAnchor->SetVisibility(true);
 	EndAnchor->SetVisibility(true);
-	TetherCable->SetVisibility(true);
+
+	// --- THE FIRST-TIME ONLY TIMER LOGIC ---
+	if (!bHasTetherSettled)
+	{
+		// First time ever: Hide it and wait 0.2s for physics to settle
+		bHasTetherSettled = true;
+		TetherCable->SetVisibility(false);
+
+		if (UWorld* World = GetWorld()) {
+			FTimerHandle SettleTimer;
+			World->GetTimerManager().SetTimer(SettleTimer, FTimerDelegate::CreateWeakLambda(this, [this]() {
+				// Only show if the player hasn't already grabbed it during this 0.2s window
+				if (bIsGrabEnabled && TetherCable) {
+					TetherCable->SetVisibility(true);
+				}
+				}), 0.20f, false);
+		}
+	}
+	else
+	{
+		// Every other time (Unhiding after dropping the object): Show instantly
+		TetherCable->SetVisibility(true);
+	}
 }
 
 bool UAzr_Grab::IsHandCompatible(USceneComponent* Hand) const

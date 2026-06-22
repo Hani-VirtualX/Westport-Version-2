@@ -98,6 +98,7 @@ private:
 	// --- INTERNAL STATE ---
 	bool bForceShowTether = false;
 	bool bRequestedVisibility = false;
+	bool bHasTetherSettled = false;
 
 	// Magnet Animation State
 	bool bIsSnapping = false;
