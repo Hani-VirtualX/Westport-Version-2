@@ -52,24 +52,45 @@ void UAzr_LatchZone::OnLatchZoneBeginOverlap(UPrimitiveComponent* OverlappedComp
 {
 	if (!SpawnedLatchIndicator || !OtherComp) return;
 
-	// Verify this is actually a VR Hand
-	if (OtherComp->ComponentHasTag(FName("Left")) || OtherComp->ComponentHasTag(FName("Right")))
+	bool bIsLeftHand = OtherComp->ComponentHasTag(FName("Left"));
+	bool bIsRightHand = OtherComp->ComponentHasTag(FName("Right"));
+
+	if (bIsLeftHand || bIsRightHand)
 	{
+		// --- SECURITY GATE: Ask the Latch if this hand is allowed! ---
+		if (CurrentActiveLatch)
+		{
+			if (CurrentActiveLatch->AllowedGrabHand == EAzr_AllowedHand::LeftHand && bIsRightHand) return;
+			if (CurrentActiveLatch->AllowedGrabHand == EAzr_AllowedHand::RightHand && bIsLeftHand) return;
+		}
+
 		int32 HandCount = 0;
 		TArray<UPrimitiveComponent*> OverlappingComps;
-
-		// We are the zone now, so we just ask ourselves for overlaps
 		GetOverlappingComponents(OverlappingComps);
 
+		// Only count hands that are actually allowed to interact
 		for (UPrimitiveComponent* Comp : OverlappingComps)
 		{
-			if (Comp && (Comp->ComponentHasTag(FName("Left")) || Comp->ComponentHasTag(FName("Right"))))
+			if (Comp)
 			{
-				HandCount++;
+				bool bCompLeft = Comp->ComponentHasTag(FName("Left"));
+				bool bCompRight = Comp->ComponentHasTag(FName("Right"));
+
+				if (bCompLeft || bCompRight)
+				{
+					bool bAllowed = true;
+					if (CurrentActiveLatch)
+					{
+						if (CurrentActiveLatch->AllowedGrabHand == EAzr_AllowedHand::LeftHand && bCompRight) bAllowed = false;
+						if (CurrentActiveLatch->AllowedGrabHand == EAzr_AllowedHand::RightHand && bCompLeft) bAllowed = false;
+					}
+
+					if (bAllowed) HandCount++;
+				}
 			}
 		}
 
-		// Only expand if this is the very first hand entering
+		// Only expand if this is the very first ALLOWED hand entering
 		if (HandCount == 1)
 		{
 			SpawnedLatchIndicator->OnExpand();
@@ -81,23 +102,45 @@ void UAzr_LatchZone::OnLatchZoneEndOverlap(UPrimitiveComponent* OverlappedComp, 
 {
 	if (!SpawnedLatchIndicator || !OtherComp) return;
 
-	// Verify a VR Hand is what just left
-	if (OtherComp->ComponentHasTag(FName("Left")) || OtherComp->ComponentHasTag(FName("Right")))
+	bool bIsLeftHand = OtherComp->ComponentHasTag(FName("Left"));
+	bool bIsRightHand = OtherComp->ComponentHasTag(FName("Right"));
+
+	if (bIsLeftHand || bIsRightHand)
 	{
+		// --- SECURITY GATE: Ignore hands that weren't allowed in the first place ---
+		if (CurrentActiveLatch)
+		{
+			if (CurrentActiveLatch->AllowedGrabHand == EAzr_AllowedHand::LeftHand && bIsRightHand) return;
+			if (CurrentActiveLatch->AllowedGrabHand == EAzr_AllowedHand::RightHand && bIsLeftHand) return;
+		}
+
 		int32 HandCount = 0;
 		TArray<UPrimitiveComponent*> OverlappingComps;
-
 		GetOverlappingComponents(OverlappingComps);
 
+		// Only count the remaining hands that are actually allowed
 		for (UPrimitiveComponent* Comp : OverlappingComps)
 		{
-			if (Comp && (Comp->ComponentHasTag(FName("Left")) || Comp->ComponentHasTag(FName("Right"))))
+			if (Comp)
 			{
-				HandCount++;
+				bool bCompLeft = Comp->ComponentHasTag(FName("Left"));
+				bool bCompRight = Comp->ComponentHasTag(FName("Right"));
+
+				if (bCompLeft || bCompRight)
+				{
+					bool bAllowed = true;
+					if (CurrentActiveLatch)
+					{
+						if (CurrentActiveLatch->AllowedGrabHand == EAzr_AllowedHand::LeftHand && bCompRight) bAllowed = false;
+						if (CurrentActiveLatch->AllowedGrabHand == EAzr_AllowedHand::RightHand && bCompLeft) bAllowed = false;
+					}
+
+					if (bAllowed) HandCount++;
+				}
 			}
 		}
 
-		// Only shrink if the box is now completely empty of hands
+		// Only shrink if the box is now completely empty of ALLOWED hands
 		if (HandCount == 0)
 		{
 			SpawnedLatchIndicator->OnShrink();

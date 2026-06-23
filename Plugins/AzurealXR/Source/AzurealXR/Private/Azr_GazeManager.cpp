@@ -2,6 +2,12 @@
 
 #include "Azr_GazeManager.h"
 #include "Azr_Gaze.h"
+#include "Azr_Pawn.h"                           
+#include "Azr_Pointer.h"                        
+#include "Kismet/GameplayStatics.h"             
+#include "Components/WidgetComponent.h"
+
+
 
 UAzr_GazeManager::UAzr_GazeManager()
 {
@@ -73,45 +79,85 @@ void UAzr_GazeManager::HandleZoneTriggered(UAzr_Gaze* TriggeredZone)
 {
 	if (!bIsManagerActive) return;
 
+	TriggeredZone->DisableGaze();
+	CompletedCount++;
+
+	// 1. Check if the entire sequence is finished
+	if (CompletedCount >= ActiveGazeZones.Num())
+	{
+		DisableManager();
+		return;
+	}
+
+	// 2. We are NOT done. Pause the Manager and wait for the Blueprint!
+	bIsWaitingForNext = true;
+
 	if (Mode == EAzr_ManagerMode::Sequential)
 	{
-		// --- SEQUENTIAL LOGIC ---
-		if (ActiveGazeZones.IsValidIndex(CurrentIndex) && ActiveGazeZones[CurrentIndex] == TriggeredZone)
-		{
-			TriggeredZone->DisableGaze();
-			CurrentIndex++;
+		// Just cue up the next index. (EnableGaze will be called later)
+		CurrentIndex++;
+	}
+	else if (Mode == EAzr_ManagerMode::NonSequential)
+	{
+		RemainingZones.Remove(TriggeredZone);
 
-			if (ActiveGazeZones.IsValidIndex(CurrentIndex) && ActiveGazeZones[CurrentIndex])
+		// Put all remaining zones to sleep so the player can't trigger them early
+		for (UAzr_Gaze* Zone : RemainingZones)
+		{
+			if (Zone)
 			{
-				ActiveGazeZones[CurrentIndex]->EnableGaze();
+				Zone->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+				Zone->ToggleHighlight(false);
 			}
-			else
-			{
-				DisableManager(); // All done!
-			}
+		}
+
+		// Force hide the global pointer and UI during the pause
+		if (AAzr_Pawn* Pawn = Cast<AAzr_Pawn>(UGameplayStatics::GetPlayerPawn(this, 0)))
+		{
+			if (UAzr_Pointer* Pointer = Pawn->FindComponentByClass<UAzr_Pointer>()) Pointer->DisablePointer();
+			if (Pawn->GazeReticleWidget) Pawn->GazeReticleWidget->SetVisibility(false);
+		}
+	}
+}
+
+void UAzr_GazeManager::TriggerNextGaze()
+{
+	// Don't do anything if we aren't actively waiting for a trigger
+	if (!bIsManagerActive || !bIsWaitingForNext) return;
+
+	bIsWaitingForNext = false;
+
+	if (Mode == EAzr_ManagerMode::Sequential)
+	{
+		// Wake up the next sequential zone
+		if (CurrentIndex < ActiveGazeZones.Num())
+		{
+			ActiveGazeZones[CurrentIndex]->EnableGaze();
 		}
 	}
 	else if (Mode == EAzr_ManagerMode::NonSequential)
 	{
-		// --- NON-SEQUENTIAL LOGIC ---
-
-		TriggeredZone->DisableGaze();
-		CompletedCount++;
-
-		// 1. Remove the finished zone from our random selection pool
-		RemainingZones.Remove(TriggeredZone);
-
-		// 2. Check if we are totally done
-		if (CompletedCount >= ActiveGazeZones.Num())
+		// Wake the remaining zones back up
+		for (UAzr_Gaze* Zone : RemainingZones)
 		{
-			DisableManager(); // All done!
+			if (Zone)
+			{
+				// Restore interaction and visuals
+				Zone->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+				Zone->ToggleHighlight(true);
+			}
 		}
-		else if (RemainingZones.Num() > 0)
-		{
-			// 3. We have survivors! Pick a random one.
-			int32 RandomIndex = FMath::RandRange(0, RemainingZones.Num() - 1);
 
-			// 4. Snap the pointer directly to the random surviving zone
+		// Bring the Reticle UI back
+		if (AAzr_Pawn* Pawn = Cast<AAzr_Pawn>(UGameplayStatics::GetPlayerPawn(this, 0)))
+		{
+			if (Pawn->GazeReticleWidget) Pawn->GazeReticleWidget->SetVisibility(true);
+		}
+
+		// Snap the pointer to a new random target
+		if (RemainingZones.Num() > 0)
+		{
+			int32 RandomIndex = FMath::RandRange(0, RemainingZones.Num() - 1);
 			RemainingZones[RandomIndex]->UpdatePointer();
 		}
 	}

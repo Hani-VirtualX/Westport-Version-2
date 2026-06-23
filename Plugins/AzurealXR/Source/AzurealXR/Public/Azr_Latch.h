@@ -44,7 +44,17 @@ enum class EAzr_LatchTrigger : uint8
 	BothHands	UMETA(DisplayName = "Both Hands")
 };
 
+UENUM(BlueprintType)
+enum class EAzr_AllowedHand : uint8
+{
+	BothHands	UMETA(DisplayName = "Both Hands"),
+	LeftHand	UMETA(DisplayName = "Left Hand Only"),
+	RightHand	UMETA(DisplayName = "Right Hand Only")
+};
+
 UCLASS(ClassGroup = (AzurealXR), meta = (BlueprintSpawnableComponent))
+
+
 class AZUREALXR_API UAzr_Latch : public USceneComponent
 {
 	GENERATED_BODY()
@@ -64,6 +74,9 @@ public:
 	int32 InteractID = 1;
 
 	// --- CONFIGURATION ---
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Latch Configuration")
+	EAzr_AllowedHand AllowedGrabHand = EAzr_AllowedHand::BothHands;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Latch Configuration")
 	EAzr_LatchType LatchType = EAzr_LatchType::Angular;
 

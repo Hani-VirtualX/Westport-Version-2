@@ -39,6 +39,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Azureal|Gaze Manager")
 	void DisableManager();
 
+	UFUNCTION(BlueprintCallable, Category = "Azureal|Logic")
+	void TriggerNextGaze();
+
 private:
 	int32 CurrentIndex = 0;
 	int32 CompletedCount = 0;
@@ -53,4 +56,5 @@ private:
 
 	UFUNCTION()
 	void HandleZoneTriggered(UAzr_Gaze* TriggeredZone);
+	bool bIsWaitingForNext = false;
 };

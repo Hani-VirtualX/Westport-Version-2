@@ -40,6 +40,9 @@ protected:
 #endif
 
 public:
+
+	void ToggleHighlight(bool bState);
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gaze Configuration")
 	int32 InteractID = 1;
 
@@ -117,7 +120,7 @@ private:
 	UMeshComponent* TargetMesh;
 
 	void EnsureInitialized();
-	void ToggleHighlight(bool bState);
+	
 	void UpdatePointerZOffset(bool bIsGazeMode);
 	UMeshComponent* FindMeshByName(FName Name);
 	UAzr_Pointer* FindPlayerPointer() const;

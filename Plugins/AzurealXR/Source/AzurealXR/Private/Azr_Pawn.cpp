@@ -20,6 +20,7 @@
 #include "Engine/World.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "NavigationSystem.h"
 #include "HeadMountedDisplayFunctionLibrary.h"
 #include "IXRTrackingSystem.h"
 #include "TimerManager.h"
@@ -528,6 +529,21 @@ void AAzr_Pawn::RightStickInput(const FInputActionValue& Value) {
 void AAzr_Pawn::ProcessStickInput(FVector2D AxisInput, UMotionControllerComponent* HandController, bool bIsLeftHand) {
     if (!bIsLocomotionEnabled || !bIsVRMode) return;
 
+    // --- NEW: THE UI SOFT-LOCK ---
+    // If either hand is currently pointing at a Hit-Test Visible UI Widget, block new locomotion inputs!
+    if (bLeftWasHoveringWidget || bRightWasHoveringWidget)
+    {
+        // 1. Safety Check: If they are mid-teleport while hovering UI, let them release the stick to complete it.
+        // If we don't do this, they could get stuck with a teleport arc permanently drawn!
+        if (AxisInput.Y > -0.5f && AxisInput.Y < 0.5f && ForwardInput == EForwardBehavior::Teleport && CachedTeleportComp)
+        {
+            CachedTeleportComp->HandleTeleportInput(0.0f, HandController);
+        }
+
+        // 2. Consume the input. Stop processing movement math.
+        return;
+    }
+
     // --- 1. THE MASTER GATE ---
     // If the joystick being pushed does not match the Dev Setting, kill it instantly!
     bool bIsAllowed = false;
@@ -572,12 +588,28 @@ void AAzr_Pawn::ProcessStickInput(FVector2D AxisInput, UMotionControllerComponen
         }
     }
     else if (AxisInput.Y < -0.5f) {
+        // --- EMERGENCY BUG FIX: NAVMESH VALIDATION ---
+        UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld());
+
         if (BackwardInput == EBackBehavior::BlinkStep && bReadyToSnapTurn && CachedTeleportComp) {
-            CachedTeleportComp->TeleportToLocation(GetActorLocation() - (ViewDir * BlinkStepDistance));
+            FVector TargetLoc = GetActorLocation() - (ViewDir * BlinkStepDistance);
+            FNavLocation ProjectedLoc;
+
+            // Only teleport if the destination is safely inside the NavMesh
+            if (NavSys && NavSys->ProjectPointToNavigation(TargetLoc, ProjectedLoc, FVector(100.0f, 100.0f, 250.0f))) {
+                CachedTeleportComp->TeleportToLocation(TargetLoc);
+            }
             bReadyToSnapTurn = false;
         }
         else if (BackwardInput == EBackBehavior::SmoothMove) {
-            AddActorWorldOffset(ViewDir * AxisInput.Y * SmoothMoveSpeed * DeltaTime, true);
+            FVector DeltaMove = ViewDir * AxisInput.Y * SmoothMoveSpeed * DeltaTime;
+            FVector TargetLoc = GetActorLocation() + DeltaMove;
+            FNavLocation ProjectedLoc;
+
+            // Only allow the micro-step backward if they are still on the NavMesh
+            if (NavSys && NavSys->ProjectPointToNavigation(TargetLoc, ProjectedLoc, FVector(50.0f, 50.0f, 250.0f))) {
+                AddActorWorldOffset(DeltaMove, true);
+            }
         }
     }
 

@@ -544,6 +544,15 @@ void UAzr_Latch::GrabLatch(USceneComponent* Hand)
 {
 	if (!bIsGrabEnabled || !Hand || ActiveHands.Contains(Hand)) return;
 
+	// --- 1. ALLOWED HAND SECURITY GATE ---
+	bool bIsRight = false;
+	if (UAzr_HandScanner* Scanner = Cast<UAzr_HandScanner>(Hand)) bIsRight = Scanner->bIsRightHand;
+	else bIsRight = Hand->ComponentHasTag(FName("Right"));
+
+	if (AllowedGrabHand == EAzr_AllowedHand::LeftHand && bIsRight) return;
+	if (AllowedGrabHand == EAzr_AllowedHand::RightHand && !bIsRight) return;
+
+	// --- GRAB APPROVED ---
 	bIsGrabbed = true;
 	ActiveHands.Add(Hand);
 	bIsTriggerEngaged = false;
@@ -553,20 +562,14 @@ void UAzr_Latch::GrabLatch(USceneComponent* Hand)
 	// --- HAPTIC: THE HANDSHAKE (VR Native) ---
 	if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
 	{
-		bool bIsRight = false;
-		if (UAzr_HandScanner* Scanner = Cast<UAzr_HandScanner>(Hand)) bIsRight = Scanner->bIsRightHand;
-		else bIsRight = Hand->ComponentHasTag(FName("Right"));
-
 		EControllerHand TargetHand = bIsRight ? EControllerHand::Right : EControllerHand::Left;
 
 		if (HapticEffect)
 		{
-			// Play the VR Haptic Asset scaled for a strong connection
 			PC->PlayHapticEffect(HapticEffect, TargetHand, 1.5f, false);
 		}
 		else
 		{
-			// Fallback if the asset slot is empty
 			PC->PlayDynamicForceFeedback(1.5f, 0.05f, !bIsRight, bIsRight, !bIsRight, bIsRight, EDynamicForceFeedbackAction::Start);
 		}
 	}
@@ -578,37 +581,27 @@ void UAzr_Latch::GrabLatch(USceneComponent* Hand)
 	}
 
 	// --- SMART GHOST HAND ASSIGNMENT ---
-	bool bIsRight = false;
-	if (UAzr_HandScanner* Scanner = Cast<UAzr_HandScanner>(Hand)) bIsRight = Scanner->bIsRightHand;
-	else bIsRight = Hand->ComponentHasTag(FName("Right"));
-
 	AAzr_Interactable* Parent = Cast<AAzr_Interactable>(GetOwner());
 
-	// UPDATED: Explicitly use the ecosystem split boolean
 	USceneComponent* GhostHand = nullptr;
 	if (bUseLatchSnapHand)
 	{
-		// Complex Mode: Use the custom latch hands
 		GhostHand = bIsRight ? CustomRightSnap : CustomLeftSnap;
 	}
 	else if (Parent)
 	{
-		// Simple Mode: Use the parent's default hands
 		GhostHand = bIsRight ? Parent->RightSnap : Parent->LeftSnap;
 	}
 
 	if (GhostHand)
 	{
-		// EXTRA SAFETY: Ensure Ghost Hand is also protected from Parent Scale
 		GhostHand->SetAbsolute(false, false, true);
-
 		GhostHand->SetHiddenInGame(false);
 		GhostHand->SetVisibility(true);
 
 		FTransform HandleWorld = TargetHandleMesh ? TargetHandleMesh->GetComponentTransform() : GetOwner()->GetActorTransform();
 		HandFlyStartRelative = Hand->GetComponentTransform().GetRelativeTransform(HandleWorld);
 
-		// Glue it to the handle for the duration of the grab
 		GhostHand->AttachToComponent(TargetHandleMesh, FAttachmentTransformRules::KeepRelativeTransform);
 		GhostHand->SetRelativeTransform(HandFlyStartRelative);
 
