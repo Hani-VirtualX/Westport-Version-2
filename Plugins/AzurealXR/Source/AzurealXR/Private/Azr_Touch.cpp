@@ -520,6 +520,10 @@ void UAzr_Touch::ToggleHighlight(bool bState)
 	else if (TargetHandleMesh) Meshes.Add(Cast<UMeshComponent>(TargetHandleMesh));
 	else if (AutoDetectedMesh) Meshes.Add(Cast<UMeshComponent>(AutoDetectedMesh));
 
+	if (UMeshComponent* WidgetMesh = Cast<UMeshComponent>(CurrentTargetWidget)) {
+		Meshes.AddUnique(WidgetMesh);
+	}
+
 	for (UMeshComponent* Mesh : Meshes) { if (Mesh) { Mesh->SetRenderCustomDepth(bState); Mesh->SetCustomDepthStencilValue(StencilID); } }
 }
 

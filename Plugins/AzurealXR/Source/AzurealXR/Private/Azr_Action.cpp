@@ -567,6 +567,10 @@ void UAzr_Action::ToggleHighlight(bool bState)
 		Meshes.Add(Cast<UMeshComponent>(TargetMesh));
 	}
 
+	if (UMeshComponent* WidgetMesh = Cast<UMeshComponent>(ActiveWidgetComp)) {
+		Meshes.AddUnique(WidgetMesh);
+	}
+
 	for (UMeshComponent* Mesh : Meshes)
 	{
 		if (Mesh && Mesh != StartAnchor && Mesh != EndAnchor)

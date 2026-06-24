@@ -522,6 +522,10 @@ void UAzr_Explain::ToggleHighlight(bool bState) {
         Meshes.Add(Cast<UMeshComponent>(TargetMesh));
     }
 
+    if (ActiveWidgetComp) {
+        Meshes.AddUnique(ActiveWidgetComp);
+    }
+
     for (UMeshComponent* Mesh : Meshes) {
         if (Mesh && Mesh != StartAnchor && Mesh != EndAnchor) {
             Mesh->SetRenderCustomDepth(bState);

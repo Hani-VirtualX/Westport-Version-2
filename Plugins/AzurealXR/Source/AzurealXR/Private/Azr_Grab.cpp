@@ -984,6 +984,23 @@ void UAzr_Grab::ToggleHighlight(bool bState, EAzr_HighlightMode Mode)
 		if (UMeshComponent* Target = Cast<UMeshComponent>(CurrentTargetMesh)) MeshesToHighlight.Add(Target);
 	}
 
+	// --- THE EXECUTION ORDER FIX ---
+	// If the widget hasn't been loaded into memory yet, force the engine to find it right now!
+	if (!CurrentTargetWidget)
+	{
+		const FAzr_GrabConfig* CurrentConfig = &Grab;
+		if (bIsAttachMode) CurrentConfig = (const FAzr_GrabConfig*)&GrabAttach;
+		else if (bIsGrabRemoveMode) CurrentConfig = (const FAzr_GrabConfig*)&GrabRemove;
+		else if (bIsGrabTriggerMode) CurrentConfig = (const FAzr_GrabConfig*)&GrabTrigger;
+
+		CurrentTargetWidget = FindWidgetByName(CurrentConfig->TetherSettings.TargetWidgetName);
+	}
+
+	// Now that we guarantee it exists, make it glow
+	if (UMeshComponent* WidgetMesh = Cast<UMeshComponent>(CurrentTargetWidget)) {
+		MeshesToHighlight.AddUnique(WidgetMesh);
+	}
+
 	for (UMeshComponent* Mesh : MeshesToHighlight)
 	{
 		if (Mesh)

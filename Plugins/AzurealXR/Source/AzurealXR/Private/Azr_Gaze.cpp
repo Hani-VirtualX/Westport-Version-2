@@ -463,6 +463,16 @@ void UAzr_Gaze::ToggleHighlight(bool bState)
 		GetOwner()->GetComponents(MeshesToHighlight);
 	}
 
+	if (SpawnedIndicator)
+	{
+		TArray<UMeshComponent*> IndicatorMeshes;
+		SpawnedIndicator->GetComponents(IndicatorMeshes);
+		for (UMeshComponent* IndMesh : IndicatorMeshes)
+		{
+			if (IndMesh) MeshesToHighlight.AddUnique(IndMesh);
+		}
+	}
+
 	for (UMeshComponent* Mesh : MeshesToHighlight)
 	{
 		if (Mesh)
