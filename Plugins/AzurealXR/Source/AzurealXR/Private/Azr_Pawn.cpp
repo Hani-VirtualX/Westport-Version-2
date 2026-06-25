@@ -529,7 +529,7 @@ void AAzr_Pawn::RightStickInput(const FInputActionValue& Value) {
 void AAzr_Pawn::ProcessStickInput(FVector2D AxisInput, UMotionControllerComponent* HandController, bool bIsLeftHand) {
     if (!bIsLocomotionEnabled || !bIsVRMode) return;
 
-    // --- NEW: THE UI SOFT-LOCK ---
+    // --- NEW: THE UI SOFT-LOCK & SCROLLING ---
     // If either hand is currently pointing at a Hit-Test Visible UI Widget, block new locomotion inputs!
     if (bLeftWasHoveringWidget || bRightWasHoveringWidget)
     {
@@ -540,7 +540,23 @@ void AAzr_Pawn::ProcessStickInput(FVector2D AxisInput, UMotionControllerComponen
             CachedTeleportComp->HandleTeleportInput(0.0f, HandController);
         }
 
-        // 2. Consume the input. Stop processing movement math.
+        // 2. THE SCROLL FIX: Translate thumbstick Y-Axis into Mouse Scroll Wheel
+        if (FMath::Abs(AxisInput.Y) > 0.1f) // Small deadzone to prevent accidental micro-scrolls
+        {
+            // Multiply by a scroll speed factor (e.g., 2.0f) to make it feel smooth and responsive
+            float ScrollAmount = AxisInput.Y * 2.0f;
+
+            if (bIsLeftHand && bLeftWasHoveringWidget)
+            {
+                LeftWidgetInteraction->ScrollWheel(ScrollAmount);
+            }
+            else if (!bIsLeftHand && bRightWasHoveringWidget)
+            {
+                RightWidgetInteraction->ScrollWheel(ScrollAmount);
+            }
+        }
+
+        // 3. Consume the input. Stop processing movement math.
         return;
     }
 
