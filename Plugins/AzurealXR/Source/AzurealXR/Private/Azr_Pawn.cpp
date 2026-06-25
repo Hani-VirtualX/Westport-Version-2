@@ -193,6 +193,23 @@ void AAzr_Pawn::Tick(float DeltaTime) {
         if (!RightHandAnim && RightHandMesh) RightHandAnim = Cast<UAzr_HandAnimInstance>(RightHandMesh->GetAnimInstance());
         if (RightHandAnim) RightHandAnim->GripAlpha = CurrentGripRight;
     }
+
+    // --- SCRIPTED SMOOTH MOVEMENT ---
+    if (bIsScriptedMoving)
+    {
+        FVector CurrentLoc = GetActorLocation();
+
+        // Move at a constant linear speed toward the target
+        FVector NewLoc = FMath::VInterpConstantTo(CurrentLoc, ScriptedMoveTarget, DeltaTime, ScriptedMoveSpeed);
+        SetActorLocation(NewLoc);
+
+        // Stop moving when we are extremely close to the target
+        if (FVector::DistSquared(NewLoc, ScriptedMoveTarget) < 1.0f)
+        {
+            SetActorLocation(ScriptedMoveTarget);
+            bIsScriptedMoving = false;
+        }
+    }
 }
 
 void AAzr_Pawn::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) {
@@ -685,4 +702,26 @@ void AAzr_Pawn::TeleportPlayer(FVector TargetLocation, FRotator TargetRotation)
                 }
             }
         }, FadeTime, false);
+}
+
+void AAzr_Pawn::ScriptedMoveTo(FVector TargetFloorLocation, FRotator TargetRotation, float MoveSpeed)
+{
+    if (!Camera) return;
+
+    // 1. SNAP ROTATION INSTANTLY (VR Comfort Safe)
+    float CameraYawOffset = Camera->GetRelativeRotation().Yaw;
+    FRotator NewPawnRot = GetActorRotation();
+    NewPawnRot.Yaw = TargetRotation.Yaw - CameraYawOffset;
+    SetActorRotation(NewPawnRot);
+
+    // 2. CALCULATE ROOM-SCALE TARGET LOCATION
+    // Subtract the physical distance the player walked away from the center of their living room
+    FVector CameraOffset = Camera->GetComponentLocation() - GetActorLocation();
+    CameraOffset.Z = 0.0f; // Ignore height offset so elevators work perfectly
+
+    ScriptedMoveTarget = TargetFloorLocation - CameraOffset;
+
+    // 3. WAKE UP THE TICK MOVEMENT
+    ScriptedMoveSpeed = MoveSpeed;
+    bIsScriptedMoving = true;
 }

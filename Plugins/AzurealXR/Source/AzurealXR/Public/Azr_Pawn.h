@@ -53,6 +53,8 @@ class AZUREALXR_API AAzr_Pawn : public APawn {
 public:
     AAzr_Pawn();
 
+
+
 protected:
     virtual void BeginPlay() override;
 
@@ -140,6 +142,9 @@ public:
 
     // --- CONFIGURATION ---
     // NEW: Master Control for Ambidextrous Support
+    UFUNCTION(BlueprintCallable, Category = "Azureal|Locomotion")
+    void ScriptedMoveTo(FVector TargetFloorLocation, FRotator TargetRotation, float MoveSpeed);
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Azureal|Locomotion Config")
     EAzr_LocomotionHand DominantLocomotionHand = EAzr_LocomotionHand::RightHand;
 
@@ -225,6 +230,13 @@ protected:
     UAzr_HandAnimInstance* RightHandAnim;
 
     void DetectPlatform();
+
+    // --- NEW: SCRIPTED MOVEMENT TRACKERS ---
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Azureal|State")
+    bool bIsScriptedMoving = false;
+
+    FVector ScriptedMoveTarget;
+    float ScriptedMoveSpeed;
 
     // NEW: Unified Ambidextrous Logic
     void ProcessStickInput(FVector2D AxisInput, UMotionControllerComponent* HandController, bool bIsLeftHand);
