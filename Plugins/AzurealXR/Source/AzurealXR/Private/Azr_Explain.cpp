@@ -135,6 +135,13 @@ void UAzr_Explain::DisableExplain() {
 
     if (ActiveAudioComp) ActiveAudioComp->Stop();
 
+    // --- THE FIX: UNHOOK EARS FROM THE WIDGET ---
+    if (ActiveExplainUI) {
+        ActiveExplainUI->OnPlayAudioClicked.RemoveDynamic(this, &UAzr_Explain::HandlePlayAudioClicked);
+        ActiveExplainUI->OnProceedClicked.RemoveDynamic(this, &UAzr_Explain::HandleProceedClicked);
+        ActiveExplainUI = nullptr;
+    }
+
     HideAllWidgets();
 
     // Clean up the visuals from whichever step was currently active
@@ -308,6 +315,7 @@ void UAzr_Explain::LoadStep(const FAzr_ExplainStep& StepData, EAzr_ExplainStepTy
 
 void UAzr_Explain::HandlePlayAudioClicked() {
 
+    if (!bIsActive) return;
     
     if (CurrentStepType == EAzr_ExplainStepType::Single) OnExplainStarted.Broadcast();
     else if (CurrentStepType == EAzr_ExplainStepType::Start) OnExplainPlusStarted.Broadcast(1);
@@ -345,6 +353,9 @@ void UAzr_Explain::HandlePlayAudioClicked() {
 }
 
 void UAzr_Explain::HandleProceedClicked() {
+
+    if (!bIsActive) return;
+
     // 1. Single Explain (No Output)
     if (CurrentStepType == EAzr_ExplainStepType::Single) {
         DisableExplain();
